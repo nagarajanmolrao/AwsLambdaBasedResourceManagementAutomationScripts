@@ -19,32 +19,41 @@ def lambda_handler(event, context):
     
     pauseFlag = True
 
-    ec2_instances = ec2_client.describe_instances()
+    next_token = None
 
-    for reservation in ec2_instances['Reservations']:
-        totalInstances += len(reservation['Instances'])
-        for instance in reservation['Instances']:
-            instance_id = instance['InstanceId']
-            logger.info(f"EC2 Instance ID: {instance_id}")
+    while True:
+        # Use NextToken for pagination
+        ec2_instances = ec2_client.describe_instances(NextToken=next_token) if next_token else ec2_client.describe_instances()
 
-            # Check if the instance has excluded tag keys
-            hasExcludedTags = any(tag['Key'] in excludedTagKeys for tag in instance.get('Tags', []))
+        for reservation in ec2_instances['Reservations']:
+            totalInstances += len(reservation['Instances'])
+            for instance in reservation['Instances']:
+                instance_id = instance['InstanceId']
+                logger.info(f"EC2 Instance ID: {instance_id}")
 
-            if hasExcludedTags:
-                logger.info(f"Instance has excluded tags, skipping: {instance_id}")
-            else:
-                instancesWithoutTags += 1
-                if instance['State']['Name'] == 'running':
-                    if not pauseFlag:
-                        # Terminate (delete) the EC2 instance
-                        ec2_client.terminate_instances(InstanceIds=[instance_id])
-                        logger.info(f"Terminated EC2 Instance: {instance_id}")
-                        deletedInstances += 1
-                    else:
-                        # Stop the EC2 instance
-                        ec2_client.stop_instances(InstanceIds=[instance_id])
-                        logger.info(f"Stopped EC2 Instance: {instance_id}")
-                        stoppedInstances += 1
+                # Check if the instance has excluded tag keys
+                hasExcludedTags = any(tag['Key'] in excludedTagKeys for tag in instance.get('Tags', []))
+
+                if hasExcludedTags:
+                    logger.info(f"Instance has excluded tags, skipping: {instance_id}")
+                else:
+                    instancesWithoutTags += 1
+                    if instance['State']['Name'] == 'running':
+                        if not pauseFlag:
+                            # Terminate (delete) the EC2 instance
+                            ec2_client.terminate_instances(InstanceIds=[instance_id])
+                            logger.info(f"Terminated EC2 Instance: {instance_id}")
+                            deletedInstances += 1
+                        else:
+                            # Stop the EC2 instance
+                            ec2_client.stop_instances(InstanceIds=[instance_id])
+                            logger.info(f"Stopped EC2 Instance: {instance_id}")
+                            stoppedInstances += 1
+
+        # Check if there is more data to retrieve
+        next_token = ec2_instances.get('NextToken')
+        if not next_token:
+            break
 
     return {
         'instancesWithoutTags': instancesWithoutTags,

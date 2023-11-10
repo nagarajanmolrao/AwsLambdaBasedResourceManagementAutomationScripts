@@ -1,63 +1,96 @@
 import json
 import boto3
+from pprint import pprint
 import os
 import logging
-
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
-    ec2_client = boto3.client('ec2')
-
-    instancesWithoutTags = 0
-    totalInstances = 0
-    deletedInstances = 0
-    stoppedInstances = 0
-
-    # Tags to exclude from EC2 instances
-    excludedTagKeys = {"Owner"}
     
+    clustersWithoutTags = 0
+    deletedClusters = 0
+    pausedClusters = 0
+    
+    # PauseFlag set to True if u want to Pause it, or else it will delete
     pauseFlag = True
-
-    next_token = None
-
-    while True:
-        # Use NextToken for pagination
-        ec2_instances = ec2_client.describe_instances(NextToken=next_token) if next_token else ec2_client.describe_instances()
-
-        for reservation in ec2_instances['Reservations']:
-            totalInstances += len(reservation['Instances'])
-            for instance in reservation['Instances']:
-                instance_id = instance['InstanceId']
-                logger.info(f"EC2 Instance ID: {instance_id}")
-
-                # Check if the instance has excluded tag keys
-                hasExcludedTags = any(tag['Key'] in excludedTagKeys for tag in instance.get('Tags', []))
-
-                if hasExcludedTags:
-                    logger.info(f"Instance has excluded tags, skipping: {instance_id}")
-                else:
-                    instancesWithoutTags += 1
-                    if instance['State']['Name'] == 'running':
-                        if not pauseFlag:
-                            # Terminate (delete) the EC2 instance
-                            ec2_client.terminate_instances(InstanceIds=[instance_id])
-                            logger.info(f"Terminated EC2 Instance: {instance_id}")
-                            deletedInstances += 1
+    
+    # invalid status list
+    invalidStatusList = ["deleting", "hardware-failure", "modifying", "cancelling-resize"]
+    
+    # Tags to check
+    tagsToCheck = event.get("tagsToCheck")
+    
+    rs_client = boto3.client("redshift")
+    response = rs_client.describe_clusters()
+    markerValue = ""
+    
+    while (markerValue != None):
+        # Handle pagination and use the current marker value
+        if("Marker" in response):
+                markerValue = response["Marker"]
+        else:
+                markerValue = None
+        
+        # Cluster Handling
+        for eachCluster in response["Clusters"]:
+            logger.info("Cluster Identifier: " + eachCluster["ClusterIdentifier"])
+            logger.info("Cluster Status: " + eachCluster["ClusterStatus"])
+            
+            # Check for invalid status from a list
+            if(eachCluster["ClusterStatus"] in invalidStatusList):
+                logger.info("Invalid cluster status !!")
+                continue
+            else:
+                # Delete cluster if all the tags are not present
+                tagFlag = False
+                if len(eachCluster["Tags"]) != 0:
+                    for eachTagDict in eachCluster["Tags"]:
+                        if(eachTagDict["Key"] in tagsToCheck):
+                            tagFlag = True
                         else:
-                            # Stop the EC2 instance
-                            ec2_client.stop_instances(InstanceIds=[instance_id])
-                            logger.info(f"Stopped EC2 Instance: {instance_id}")
-                            stoppedInstances += 1
-
-        # Check if there is more data to retrieve
-        next_token = ec2_instances.get('NextToken')
-        if not next_token:
-            break
-
+                            tagFlag = False
+                else:
+                    tagFlag = False
+                    
+                if(tagFlag == False):
+                    if(pauseFlag == True):
+                        # Pause the clusters
+                        pauseResponse = rs_client.pause_cluster(
+                            ClusterIdentifier=eachCluster["ClusterIdentifier"])
+                        
+                        logger.info("Paused Cluster: " + eachCluster["ClusterIdentifier"])
+                        pausedClusters += 1
+                    else:
+                        # Uncomment the following block to actually delete the clusters
+                    
+                        # skipFinalSnapshot = bool(event.get("skipFinalSnapshot"))
+                        # if(skipFinalSnapshot == True):
+                        #     deleteResponse = rs_client.delete_cluster(
+                        #         ClusterIdentifier=eachCluster["ClusterIdentifier"],
+                        #         SkipFinalClusterSnapshot = skipFinalSnapshot)
+                        # else:
+                        #     deleteResponse = rs_client.delete_cluster(
+                        #         ClusterIdentifier=eachCluster["ClusterIdentifier"],
+                        #         SkipFinalClusterSnapshot = skipFinalSnapshot,
+                        #         FinalClusterSnapshotIdentifier = str(eachCluster["ClusterIdentifier"] + "_snapshot"),
+                        #         FinalClusterSnapshotRetentionPeriod = 10)
+                
+                        logger.info("Deleted Cluster: " + eachCluster["ClusterIdentifier"])
+                        deletedClusters += 1
+                
+                else:
+                    logger.info("All tags found in cluster: " + eachCluster["ClusterIdentifier"])
+                    clustersWithoutTags += 1
+                
+        # Pagination Handling
+        if(markerValue != "" and markerValue != None):
+            response = rs_client.describe_clusters(Marker=markerValue)
+        else:
+            markerValue = None
+    
     return {
-        'instancesWithoutTags': instancesWithoutTags,
-        'deletedInstances': deletedInstances,
-        'stoppedInstances': stoppedInstances,
-        'totalInstances': totalInstances
+        'clustersWithoutTags': clustersWithoutTags,
+        'deletedClusters': deletedClusters,
+        'pausedClusters': pausedClusters
     }
