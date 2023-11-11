@@ -64,7 +64,8 @@ def lambda_handler(event, context):
                     else:
                         # Uncomment the following block to actually delete the clusters
                     
-                        # skipFinalSnapshot = bool(event.get("skipFinalSnapshot"))
+                        # skipFinalSnapshot set to True if u don't want Final Snapshot, else False
+                        # skipFinalSnapshot = False
                         # if(skipFinalSnapshot == True):
                         #     deleteResponse = rs_client.delete_cluster(
                         #         ClusterIdentifier=eachCluster["ClusterIdentifier"],
