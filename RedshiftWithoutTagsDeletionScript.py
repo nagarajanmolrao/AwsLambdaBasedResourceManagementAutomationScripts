@@ -11,7 +11,8 @@ def lambda_handler(event, context):
     clustersWithoutTags = 0
     deletedClusters = 0
     pausedClusters = 0
-    
+    snapshotsCreated = 0
+
     # PauseFlag set to True if u want to Pause it, or else it will delete
     pauseFlag = True
     
@@ -55,9 +56,29 @@ def lambda_handler(event, context):
                     
                 if(tagFlag == False):
                     if(pauseFlag == True):
+
+                        # Check if this cluster has atleast one snapshot
+                        snapshotCount = 0
+                        snapshotResponse = rs_client.describe_cluster_snapshots(
+                            ClusterIdentifier=eachCluster["ClusterIdentifier"],
+                            ClusterExists=True)
+                            try:
+                                snapshotCount = len(snapshotResponse["Snapshots"])
+                            except Exception as e:
+                                snapshot = 0
+
+                        # If no snapshots are found, create one snapshot
+                        if(snapshot==0):
+                            snapshotCreationResponse = rs_client.create_cluster_snapshot(
+                                SnapshotIdentifier=str(eachCluster["ClusterIdentifier"] + "-snapshot"),
+                                ClusterIdentifier=eachCluster["ClusterIdentifier"])
+                            logger.info("Snapshot Created for " + eachCluster["ClusterIdentifier"])
+                            snapshotsCreated += 1
+
                         # Pause the clusters
                         pauseResponse = rs_client.pause_cluster(
-                            ClusterIdentifier=eachCluster["ClusterIdentifier"])
+                            ClusterIdentifier=eachCluster["ClusterIdentifier"],
+                            )
                         
                         logger.info("Paused Cluster: " + eachCluster["ClusterIdentifier"])
                         pausedClusters += 1
@@ -74,7 +95,7 @@ def lambda_handler(event, context):
                         #     deleteResponse = rs_client.delete_cluster(
                         #         ClusterIdentifier=eachCluster["ClusterIdentifier"],
                         #         SkipFinalClusterSnapshot = skipFinalSnapshot,
-                        #         FinalClusterSnapshotIdentifier = str(eachCluster["ClusterIdentifier"] + "_snapshot"),
+                        #         FinalClusterSnapshotIdentifier = str(eachCluster["ClusterIdentifier"] + "-snapshot"),
                         #         FinalClusterSnapshotRetentionPeriod = 10)
                 
                         logger.info("Deleted Cluster: " + eachCluster["ClusterIdentifier"])
@@ -93,5 +114,6 @@ def lambda_handler(event, context):
     return {
         'clustersWithoutTags': clustersWithoutTags,
         'deletedClusters': deletedClusters,
+        'snapshotsCreated': snapshotsCreated,
         'pausedClusters': pausedClusters
     }
