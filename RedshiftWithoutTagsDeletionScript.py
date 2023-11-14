@@ -77,7 +77,7 @@ def lambda_handler(event, context):
 
                         # Pause the clusters
                         pauseResponse = rs_client.pause_cluster(
-                            ClusterIdentifier=eachCluster["ClusterIdentifier"],
+                            ClusterIdentifier=eachCluster["ClusterIdentifier"]
                             )
                         
                         logger.info("Paused Cluster: " + eachCluster["ClusterIdentifier"])
